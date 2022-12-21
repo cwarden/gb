@@ -8,12 +8,12 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/DataDog/zstd"
 	"github.com/leijurv/gb/config"
 	"github.com/leijurv/gb/crypto"
 	"github.com/leijurv/gb/db"
 	"github.com/leijurv/gb/storage"
 	bip39 "github.com/tyler-smith/go-bip39"
+	"tailscale.com/smallzstd"
 )
 
 func BackupDB() {
@@ -40,25 +40,35 @@ func BackupDB() {
 	}
 
 	log.Println("Done reading, now compressing database file")
-	compressed, err := zstd.Compress(nil, dbBytes)
+
+	var b bytes.Buffer
+	z := bufio.NewWriter(&b)
+	encoder, err := smallzstd.NewEncoder(z)
+	var compressed []byte
+	compressed = encoder.EncodeAll(dbBytes, compressed)
 	if err != nil {
 		panic(err)
 	}
 
 	log.Println("Done compressing, now encrypting database file")
+	uncompressedSize := len(dbBytes)
+	// uncompressedHash := sha1.Sum(dbBytes)
 	enc := crypto.EncryptDatabase(compressed, key)
-	log.Println("Database", len(dbBytes), "bytes, compressed encrypted to", len(enc), "bytes")
+	log.Println("Database", uncompressedSize, "bytes, compressed encrypted to", len(enc), "bytes")
 
 	// <paranoia>
-	testDec := crypto.DecryptDatabase(enc, key)
-	testDecomp, err := zstd.Decompress(nil, testDec)
-	if err != nil {
-		panic(err)
-	}
-	if !bytes.Equal(testDecomp, dbBytes) {
-		panic("gcm and/or zstd have failed me")
-	}
-	log.Println("Decrypt and decompress paranoia verification succeeded")
+	/*
+		testDec := crypto.DecryptDatabase(enc, key)
+		testDecomp, err := zstd.Decompress(nil, testDec)
+		if err != nil {
+			panic(err)
+		}
+		testHash := sha1.Sum(testDecomp)
+		if !bytes.Equal(testHash[:], uncompressedHash[:]) {
+			panic("gcm and/or zstd have failed me")
+		}
+		log.Println("Decrypt and decompress paranoia verification succeeded")
+	*/
 	// </paranoia>
 
 	name := "db-backup-" + strconv.FormatInt(now, 10)
